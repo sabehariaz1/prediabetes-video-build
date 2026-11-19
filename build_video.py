@@ -3,15 +3,15 @@
 Prediabetes explainer video builder.
 
 Pipeline (runs on GitHub Actions or locally):
-  1. Voiceover  - natural neural voice (edge-tts) per scene, OR your own recordings
-                  placed in video-src/voiceover/<scene-id>.mp3|wav|m4a
+  1. Voiceover  - natural neural voice (edge-tts), fallback gTTS, then silent+captions;
+                  OR your own recordings in voiceover/<scene-id>.mp3|wav|m4a
   2. Music      - original, royalty-free soft uplifting track synthesised in code
   3. Visuals    - supersampled (anti-aliased) animation drawn with Pillow, 1920x1080 @ 30 fps
   4. Mix + mux  - music ducks under the voice, loudness normalised, H.264 + AAC MP4
 
 Environment options (all optional):
-  TTS_VOICE   comma list of voices to try   (default en-US-AvaNeural,en-US-AndrewNeural,en-GB-SoniaNeural)
-  TTS_RATE    speaking rate                 (default -6%)
+  TTS_VOICE   comma list of voices to try
+  TTS_RATE    speaking rate, e.g. -5%  (default +0%)
   PREVIEW=1   fast low-res preview render
   DRY_RUN=1   no internet needed: placeholder silence instead of TTS (for testing only)
   OUT_FILE    output path                   (default ../prediabetes-explainer.mp4)
@@ -31,8 +31,8 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 HERE = Path(__file__).resolve().parent
-OUT = Path(os.environ.get("OUT_FILE", HERE.parent / "prediabetes-explainer.mp4"))
-WORK = HERE / "build"
+OUT = Path(os.environ.get("OUT_FILE", HERE / "prediabetes-explainer.mp4"))
+WORK = HERE / "_build"
 WORK.mkdir(exist_ok=True)
 
 PREVIEW = os.environ.get("PREVIEW") == "1"
@@ -43,8 +43,23 @@ SS = 2                      # supersampling factor (anti-aliasing)
 K = W * SS / 1920.0         # design-units (1920x1080) -> canvas pixels
 SR = 44100
 
-VOICES = os.environ.get("TTS_VOICE", "en-US-AvaNeural,en-US-AndrewNeural,en-GB-SoniaNeural").split(",")
-RATE = os.environ.get("TTS_RATE", "-6%")
+VOICES = os.environ.get(
+    "TTS_VOICE",
+    "en-US-AvaMultilingualNeural,en-US-AndrewMultilingualNeural,en-US-EmmaMultilingualNeural,"
+    "en-US-AvaNeural,en-US-AndrewNeural,en-GB-SoniaNeural").split(",")
+RATE = os.environ.get("TTS_RATE", "+0%")
+TARGET = float(os.environ.get("TARGET_SECONDS", "120"))   # final video length
+
+NARRATION = [
+    {"id": "hook", "narration": "If you have a risk score of 5 or higher on the prediabetes risk calculator, you are at high risk of prediabetes. Let's walk through what that means, and what you can do about it."},
+    {"id": "what", "narration": "Prediabetes means your blood sugar is higher than normal, but not yet high enough to be called type 2 diabetes. Think of it as a warning light on your car's dashboard. It's the moment when you can still act."},
+    {"id": "silent", "narration": "Here's the catch. Prediabetes usually has no symptoms, so most people who have it don't know. That's why a simple screening matters."},
+    {"id": "tests", "narration": "Doctors use three blood tests. Fasting glucose: below 100 milligrams per decilitre is normal, 100 to 125 is prediabetes, and 126 or higher is diabetes. A1C: below 5.7 percent is normal, 5.7 to 6.4 is prediabetes, and 6.5 or higher is diabetes. And the two-hour glucose tolerance test: below 140 is normal, 140 to 199 is prediabetes, and 200 or higher is diabetes."},
+    {"id": "calc", "narration": "The calculator turns six simple questions about common risk factors into one score. A score of 5 or higher means several of those risk factors are present."},
+    {"id": "dpp", "narration": "Now, the good news. In the large Diabetes Prevention Program trial, adults with prediabetes who lost about seven percent of their body weight and kept active for 150 minutes a week cut their risk of developing type 2 diabetes by fifty-eight percent."},
+    {"id": "steps", "narration": "So start small. Walk briskly for 150 minutes a week. Choose vegetables, whole grains and lean protein over sugary drinks and sweets. Aim for seven to nine hours of sleep. And book a blood sugar test with your doctor."},
+    {"id": "outro", "narration": "This video is for education, not diagnosis. If your score is 5 or higher, talk to your doctor about a blood test. Catching prediabetes early can change the story."},
+]
 
 # ---------------------------------------------------------------- colours
 BGC = (11, 34, 58)
@@ -461,35 +476,48 @@ def write_wav(path, data, channels=1):
         wf.writeframes(pcm.tobytes())
 
 
+def _gtts(text, path):
+    from gtts import gTTS
+    gTTS(text, lang="en", tld="co.uk").save(str(path))
+
+
 def get_voice(scene):
+    """Returns a path to the voice file, or None (video is then built with captions + music only)."""
+    import time
     for ext in (".mp3", ".wav", ".m4a"):
         p = HERE / "voiceover" / (scene["id"] + ext)
         if p.exists():
             print(f"  using your recording: {p.name}")
             return p
-    out = WORK / f"{scene['id']}.mp3"
     if DRY_RUN:
-        secs = len(scene["narration"].split()) * 0.38
-        out = WORK / f"{scene['id']}.wav"
-        write_wav(out, np.zeros(int(secs * SR)))
-        return out
-    last = None
+        return None
+    out = WORK / f"{scene['id']}.mp3"
     for attempt in range(3):
         for v in VOICES:
             try:
+                if out.exists():
+                    out.unlink()
                 asyncio.run(_tts(scene["narration"], v.strip(), out))
                 if out.exists() and out.stat().st_size > 2000:
                     print(f"  voice {v.strip()} ok")
                     return out
             except Exception as e:  # network hiccup / voice unavailable -> next voice
-                last = e
-                print(f"  voice {v} failed: {e}")
-    sys.exit(f"TTS failed for scene {scene['id']}: {last}\n"
-             "Tip: record your own voice into video-src/voiceover/<scene-id>.mp3 and re-run.")
+                print(f"  voice {v.strip()} failed: {e}")
+        time.sleep(2)
+    try:
+        _gtts(scene["narration"], out)
+        if out.exists() and out.stat().st_size > 2000:
+            print("  fallback voice (gTTS) ok")
+            return out
+    except Exception as e:
+        print(f"  gTTS failed: {e}")
+    print(f"::warning::No voice could be generated for scene {scene['id']}; using captions + music only.")
+    return None
 
 
-def decode(path):
-    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-f", "s16le", "-ac", "1",
+def decode(path, tempo=1.0):
+    af = ["-filter:a", f"atempo={tempo:.4f}"] if abs(tempo - 1) > 0.01 else []
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(path)] + af + ["-f", "s16le", "-ac", "1",
                           "-ar", str(SR), "-"], check=True, capture_output=True).stdout
     return np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768
 
@@ -568,15 +596,32 @@ def build_audio(scenes, total):
 
 # ---------------------------------------------------------------- main
 def main():
-    scenes = json.loads((HERE / "script.json").read_text(encoding="utf-8"))
+    scenes = [dict(x) for x in NARRATION]
+    last = len(scenes) - 1
     print("Step 1/3: voiceover")
-    t0 = 0.0
     for i, S in enumerate(scenes):
         print(f" scene {S['id']}")
-        S["audio"] = decode(get_voice(S))
+        S["file"] = get_voice(S)
+        S["lead"] = 0.8 if i == 0 else 0.5
+        S["tail"] = 2.5 if i == last else 0.5
+
+    def load(S, tempo=1.0):
+        if S["file"] is None:   # no voice: reading-time placeholder so captions still work
+            return np.zeros(int(len(S["narration"].split()) * 0.40 * SR / tempo), np.float32)
+        return decode(S["file"], tempo)
+
+    for S in scenes:
+        S["audio"] = load(S)
+    pad = sum(S["lead"] + S["tail"] for S in scenes)
+    speech = sum(len(S["audio"]) for S in scenes) / SR
+    factor = min(1.15, max(0.85, speech / max(1.0, TARGET - pad)))
+    print(f"Speech {speech:.1f}s, padding {pad:.1f}s, tempo x{factor:.3f} to reach {TARGET:.0f}s")
+    if abs(factor - 1) > 0.01:
+        for S in scenes:
+            S["audio"] = load(S, factor)
+    t0 = 0.0
+    for S in scenes:
         S["vlen"] = len(S["audio"]) / SR
-        S["lead"] = 0.9 if i == 0 else 0.7
-        S["tail"] = 2.8 if i == len(scenes) - 1 else 0.8
         S["dur"] = S["lead"] + S["vlen"] + S["tail"]
         S["start"] = t0
         S["chunks"] = caption_chunks(S["narration"])

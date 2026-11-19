@@ -1,19 +1,23 @@
-# Prediabetes explainer video: GitHub build kit
+# Prediabetes explainer video (GitHub build)
 
-## Setup (5 minutes)
-1. Copy these into your repo root, keeping the folders:
-   - `.github/workflows/build-video.yml`
-   - `video-src/` (build_video.py, script.json, voiceover/)
-2. On GitHub: **Settings > Actions > General > Workflow permissions > Read and write permissions** > Save.
-3. **Actions tab > "Build explainer video" > Run workflow.** It takes about 8-15 minutes.
-4. The finished `prediabetes-explainer.mp4` is committed to your repo root (and attached as a downloadable artifact). Your GitHub Pages site picks it up automatically.
-5. Open `page-snippet.html`, paste the `<video>` tag and the ranges/references section into your `index.html`.
+Only 2 things are needed in the repo:
+1. `build_video.py`  (repo root)
+2. `.github/workflows/main.yml`
 
-## Customising
-- **Words:** edit `video-src/script.json`. The first sentence starts with "If you have a risk score of 5 or higher...". Scene timing adjusts to the voice automatically.
-- **Screen text / ranges:** edit `TESTS` and `REFS` in `video-src/build_video.py`.
-- **Voice:** set env `TTS_VOICE` in the workflow (e.g. `en-GB-SoniaNeural`, `en-US-AndrewNeural`). If the voice annoys you, the most natural option is your own: record one file per scene and save as `video-src/voiceover/hook.mp3`, `what.mp3`, `silent.mp3`, `tests.mp3`, `calc.mp3`, `dpp.mp3`, `steps.mp3`, `outro.mp3`. Any file present replaces the generated voice.
-- **Music:** original, royalty-free, generated in code (soft C-G-Am-F piano-pluck and pad, ducked under the voice).
+## Steps
+1. New repo > Add file > **Upload files** > drag in `build_video.py` (just the file, not a folder) > Commit.
+2. Add file > **Create new file** > name it exactly `.github/workflows/main.yml` > paste the workflow > Commit.
+3. Settings > Actions > General > Workflow permissions > **Read and write** > Save.
+4. Actions tab > **Build explainer video** > **Run workflow**. Takes ~10-20 min.
+5. `prediabetes-explainer.mp4` appears in the repo root (also under the run's Artifacts).
+6. Upload that mp4 to your calculator repo and paste `page-snippet.html` into your page.
 
-## Local test
-`pip install pillow numpy edge-tts` (plus ffmpeg), then `PREVIEW=1 python video-src/build_video.py` for a fast low-res render.
+## Voice
+Uses Microsoft neural voices (Ava, Andrew, Emma "Multilingual", the most natural). The video is fitted to 2:00 automatically.
+Fallbacks: Google voice, then captions + music only (the build never fails because of the voice).
+For a fully human voice: record one file per scene and upload to a `voiceover/` folder next to build_video.py:
+hook.mp3, what.mp3, silent.mp3, tests.mp3, calc.mp3, dpp.mp3, steps.mp3, outro.mp3
+
+## Editing
+Narration is the `NARRATION` list near the top of build_video.py. Screen ranges are `TESTS`, references are `REFS`.
+Env options: TTS_VOICE, TTS_RATE (e.g. -5%), TARGET_SECONDS (default 120).
